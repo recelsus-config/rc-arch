@@ -12,4 +12,6 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - KEEP_ENDPOINT=${KEEP_ENDPOINT:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_USER=${GITHUB_USER:-}
     command: /bin/sh -c "tmux new -d -s default && tail -f /dev/null"

@@ -15,6 +15,7 @@ INSTALL_PACKAGES=(
     "nodejs"
     "npm"
     "jq"
+    "less"
 )
 
 GIT_USERNAME="recelsus-config"
