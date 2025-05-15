@@ -1,5 +1,5 @@
 services:
-  rc-vim:
+  rc-arch:
     image: ghcr.io/recelsus-config/rc-arch:latest
     container_name: rc-arch
     tty: true
