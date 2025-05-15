@@ -1,0 +1,6 @@
+*
+
+!.gitignore
+!Dockerfile
+!config
+!README.md
