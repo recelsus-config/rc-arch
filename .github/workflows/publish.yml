@@ -30,7 +30,7 @@ jobs:
 
       - name: Build and push image to GHCR
         run: |
-          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/rc-vim
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/rc-arch
           docker build -t $IMAGE_NAME:latest .
           docker push $IMAGE_NAME:latest
 
