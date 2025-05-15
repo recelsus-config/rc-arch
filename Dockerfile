@@ -1,0 +1,38 @@
+# vim: ft=dockerfile
+FROM archlinux:latest
+
+ARG USERNAME="arch"
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+ENV TERM=xterm-256color \
+    SHELL=/bin/bash \
+    SSH_CONNECTION=1
+
+COPY config /tmp/config
+
+RUN set -eux; \
+    \
+    pacman -Syu --noconfirm && \
+    source /tmp/config && \
+    pacman -S --noconfirm --needed sudo git "${INSTALL_PACKAGES[@]}" && \
+    \
+    groupadd -g $USER_GID $USERNAME && \
+    useradd -m -u $USER_UID -g $USERNAME -s /bin/bash $USERNAME && \
+    echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME && \
+    \
+    git clone https://github.com/${CONFIG_REPO_NVIM}.git /home/${USERNAME}/.config/nvim && \
+    git clone https://github.com/${CONFIG_REPO_TMUX}.git /home/${USERNAME}/.config/tmux && \
+    git clone https://github.com/${CONFIG_REPO_BASH}.git /home/${USERNAME}/.config/bash && \
+    \
+    echo 'source ~/.config/bash/bashrc' >> /home/${USERNAME}/.bashrc && \
+    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.config /home/${USERNAME}/.bashrc && \
+    \
+    rm -f /tmp/config && \
+    pacman -Scc --noconfirm && \
+    rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
+
+USER $USERNAME
+WORKDIR /home/$USERNAME
+
+CMD ["/usr/bin/tmux"]
