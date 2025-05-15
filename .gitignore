@@ -1,9 +1,14 @@
 *
 
-!.gitignore
-!Dockerfile
-!config
 !README.md
+!.gitignore
+
+!Dockerfile
+!docker-compose.yml
+!config
+
+!data/
+!data/.gitkeep
 !.github/
 !.github/workflows/
 !.github/workflows/publish.yml

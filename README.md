@@ -1,34 +1,77 @@
-## Overview
+## 🐧 rc-arch: Arch Linux Development Container
 
-This Dockerfile builds an Arch Linux container with a pre-configured development environment. It installs various tools and sets up configuration files for `nvim`, `tmux`, and `bash` from specified GitHub repositories.
+### ✅ Installation
 
-## Features
+```bash
+docker pull ghcr.io/recelsus-config/rc-arch:latest
+```
 
-- Installs essential development tools like `neovim`, `tmux`, `ripgrep`, `fzf`, `fd`, `cmake`, `make`, `clang`, `nodejs`, `npm`, and `jq`.
-- Configures a non-root user with `sudo` access.
-- Clones configuration files for `nvim`, `tmux`, and `bash` from specified Git repositories.
-- Sets up a custom `.bashrc`.
+### ✅ Usage (with Docker Compose)
 
-## Usage
+1. Make sure `docker-compose.yaml` is available in the project root (already included).
+2. Start the container in the background:
 
-Build the Docker image: `docker build -t arch-container .`
-Run the container: `docker run -it arch-container`
+```bash
+docker compose up -d
+```
 
-This will start a `tmux` session within the container.
+3. Attach to the running `tmux` session:
 
-## Dependencies
+```bash
+docker exec -it rc-arch tmux
+docker exec -it rc-arch tmux a
+```
 
-- git
-- neovim
-- tmux
-- bash
-- ripgrep
-- fzf
-- fd
-- cmake
-- make
-- clang
-- nodejs
-- npm
-- jq
+* The container remains active thanks to `tmux` running as the main process.
+* You can create or switch sessions manually using `tmux new -As dev` or similar.
+
+---
+
+## 🧰 Features
+
+* 🛠️ **Pre-installed development tools**, including:
+
+  * `neovim`, `tmux`, `ripgrep`, `fzf`, `fd`, `jq`
+  * `cmake`, `make`, `clang`, `nodejs`, `npm`
+* 👤 **Non-root user (`arch`) with passwordless sudo**
+* 🧩 **Automatically clones configuration files** for:
+
+  * `nvim`, `tmux`, and `bash` from your GitHub repositories
+* 🧾 **Custom `.bashrc` sourced automatically**
+
+---
+
+## 📦 Included Packages
+
+* git
+* neovim
+* tmux
+* bash
+* ripgrep
+* fzf
+* fd
+* cmake
+* make
+* clang
+* nodejs
+* npm
+* jq
+
+---
+
+## 📝 Notes
+
+* The container is based on [`archlinux:latest`](https://hub.docker.com/_/archlinux).
+* Builds and pushes to [GitHub Container Registry (GHCR)](https://ghcr.io) are automated via GitHub Actions.
+* Configuration repositories are expected to be public or accessible via HTTPS.
+
+---
+
+Let me know if you'd like to include:
+
+* A sample `docker-compose.yml`
+* Preconfigured `tmux.conf` behavior
+* Shared volumes for host-container integration
+
+Happy to help tailor it for team collaboration or onboarding documentation!
 

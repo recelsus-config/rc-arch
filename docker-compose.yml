@@ -1,0 +1,12 @@
+services:
+  rc-vim:
+    image: ghcr.io/recelsus-config/rc-arch:latest
+    container_name: rc-arch
+    tty: true
+    stdin_open: true
+    volumes:
+      - ./data:/home/arch/data
+    working_dir: /home/arch
+    environment:
+      - TERM=xterm-256color
+    command: /bin/sh -c "tmux new -d -s default && tail -f /dev/null"
