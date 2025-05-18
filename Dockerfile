@@ -15,7 +15,7 @@ RUN set -eux; \
     \
     pacman -Syu --noconfirm && \
     source /tmp/config && \
-    pacman -S --noconfirm --needed sudo git "${INSTALL_PACKAGES[@]}" && \
+    pacman -S --noconfirm --needed sudo git base-devel rustup "${INSTALL_PACKAGES[@]}" && \
     \
     groupadd -g $USER_GID $USERNAME && \
     useradd -m -u $USER_UID -g $USERNAME -s /bin/bash $USERNAME && \
@@ -28,11 +28,24 @@ RUN set -eux; \
     echo 'source ~/.config/bash/bashrc' >> /home/${USERNAME}/.bashrc && \
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.config /home/${USERNAME}/.bashrc && \
     \
-    rm -f /tmp/config && \
-    pacman -Scc --noconfirm && \
-    rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
+    git clone https://aur.archlinux.org/paru.git /tmp/paru && \
+    chown -R ${USERNAME}:${USERNAME} /tmp/paru && \
+    \
+    rm -f /tmp/config
 
 USER $USERNAME
 WORKDIR /home/$USERNAME
+
+RUN set -eux; \
+    rustup default stable && \
+    \
+    cd /tmp/paru && \
+    makepkg -si --noconfirm && \
+    rm -rf /tmp/paru && \
+    \
+    paru -Syu --noconfirm && \
+    paru -S conan --noconfirm && \
+    paru -Scc --noconfirm && \
+    sudo rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
 
 CMD ["/usr/bin/tmux"]
