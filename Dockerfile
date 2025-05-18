@@ -9,7 +9,7 @@ ENV TERM=xterm-256color \
     SHELL=/bin/bash \
     SSH_CONNECTION=1 \
     CARGO_HOME=/home/${USERNAME}/.local/share/cargo \
-    CONAN_USER_HOME=/home/${USERNAME}/.local/share/conan \
+    CONAN_HOME=/home/${USERNAME}/.local/share/conan \
     RUSTUP_HOME=/home/${USERNAME}/.local/share/rustup
 
 COPY config /tmp/config
