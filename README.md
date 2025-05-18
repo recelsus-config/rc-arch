@@ -20,6 +20,7 @@ docker compose up -d
 ```bash
 docker exec -it rc-arch tmux
 docker exec -it rc-arch tmux a
+git-update # automated git pull bash & tmux & nvim config
 ```
 
 * The container remains active thanks to `tmux` running as the main process.
