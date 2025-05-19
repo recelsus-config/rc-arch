@@ -1,0 +1,14 @@
+services:
+  rc-arch:
+    environment:
+      - NVIM_ENV=minimal
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_USER=${GITHUB_USER:-}
+    # ports:
+    #   - "8080:22"
+    #   - "3000:3000"
+
