@@ -6,5 +6,6 @@ services:
     stdin_open: true
     volumes:
       - ./data:/home/arch/data
+      - ~/.ssh:/home/arch/.ssh:ro
     working_dir: /home/arch
     command: /bin/sh -c "tmux new -d -s default && tail -f /dev/null"
