@@ -16,6 +16,7 @@ INSTALL_PACKAGES=(
     "npm"
     "jq"
     "less"
+    "unzip"
 )
 
 GIT_USERNAME="recelsus-config"
