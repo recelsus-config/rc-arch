@@ -23,9 +23,9 @@ fi
 
 if [ -d "/home/${user_name}" ]; then
     chown "${desired_uid}:${desired_gid}" "/home/${user_name}" || true
-    find "/home/${user_name}" \
-        \( -path "/home/${user_name}/.ssh" -prune \) -o \
-        \( -mindepth 1 -writable -exec chown "${desired_uid}:${desired_gid}" {} + \) || true
+    find "/home/${user_name}" -mindepth 1 \
+        \( -path "/home/${user_name}/.ssh" -prune -o \
+           -writable -exec chown "${desired_uid}:${desired_gid}" {} + \) || true
 fi
 
 export HOME="/home/${user_name}"
