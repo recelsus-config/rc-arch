@@ -3,9 +3,9 @@ name: Publish Docker image to GHCR
 on:
   push:
     branches:
-      - release
+      - master
     paths:
-      - Dockerfile
+      - docker/Dockerfile
       - config
       - .github/workflows/publish.yml
   workflow_dispatch:
@@ -31,6 +31,5 @@ jobs:
       - name: Build and push image to GHCR
         run: |
           IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/rc-arch
-          docker build -t $IMAGE_NAME:latest .
+          docker build -t $IMAGE_NAME:latest -f docker/Dockerfile .
           docker push $IMAGE_NAME:latest
-

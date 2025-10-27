@@ -1,11 +1,16 @@
 services:
   rc-arch:
-    image: ghcr.io/recelsus-config/rc-arch:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: rc-arch
     container_name: rc-arch
     tty: true
     stdin_open: true
+    env_file:
+      - ../.env
     volumes:
-      - ./data:/home/arch/data
+      - ../data:/home/arch/data
       - ~/.ssh:/home/arch/.ssh:ro
     working_dir: /home/arch
     command: /bin/sh -c "tmux new -d -s default && tail -f /dev/null"

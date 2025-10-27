@@ -3,10 +3,15 @@
 !README.md
 !.gitignore
 
-!Dockerfile
-!docker-compose.yml
-!docker-compose.override.yml.example
 !config
+!docker/
+!docker/Dockerfile
+!docker/docker-compose.yml
+!docker/docker-compose.dev.yml
+!docker/dev.sh
+!docker/entrypoint.sh
+!.env
+!.env.example
 
 !data/
 !data/.gitkeep
