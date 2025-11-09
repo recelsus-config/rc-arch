@@ -1,0 +1,450 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+image_ref="ghcr.io/recelsus-config/rc-arch:latest"
+default_container_name="rc-arch"
+
+usage() {
+    cat <<'USAGE'
+rc-arch Docker wrapper
+
+Usage:
+  rc-arch [subcommand] [options] [-- CMD]
+
+Subcommands:
+  (default) / start   : run a new container or attach to an existing one
+  stop             : stop the target container (optionally remove it)
+  remove           : stop and remove every container created from the rc-arch image (same as stop --all --remove)
+
+Shared options:
+  -t, --target NAME  set the target container name (default: rc-arch)
+  -h, --help         show this help
+
+Start options:
+  -n, --name NAME    set --name for docker run (default: rc-arch)
+  -k, --keep         skip --rm so the container can be reused
+
+Stop options:
+  -a, --all          act on every container created from the rc-arch image
+  -r, --remove       remove containers after stopping (auto for --rm runs)
+
+Arguments after -- execute inside the container; if omitted the wrapper runs "tmux || bash".
+USAGE
+}
+
+print_error() {
+    echo "Error: $1" >&2
+}
+
+detect_subcommand() {
+    local args=("$@")
+    local i token
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        token="${args[i]}"
+        case "${token}" in
+            --)
+                break
+                ;;
+            -n|--name|-t|--target)
+                ((i++))
+                ;;
+            --name=*|--target=*)
+                ;;
+            -k|-r|-a|--keep|--remove|--all|-h|--help)
+                ;;
+            start|stop|remove)
+                echo "${token}"
+                return
+                ;;
+        esac
+    done
+    echo "start"
+}
+
+list_image_container_ids() {
+    docker ps -aq --filter "ancestor=${image_ref}"
+}
+
+ensure_image_container_exists() {
+    if [[ -z "$(list_image_container_ids)" ]]; then
+        print_error "No containers exist for the target image (${image_ref})"
+        exit 1
+    fi
+}
+
+container_status() {
+    docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null || true
+}
+
+container_auto_remove() {
+    docker inspect -f '{{.HostConfig.AutoRemove}}' "$1" 2>/dev/null || true
+}
+
+ensure_container_matches_image() {
+    local name="$1"
+    local config_image
+    config_image="$(docker inspect -f '{{.Config.Image}}' "${name}" 2>/dev/null)" || {
+        print_error "Container ${name} does not exist"
+        return 1
+    }
+    if [[ "${config_image}" != "${image_ref}" ]]; then
+        print_error "Container ${name} was created from ${config_image}, not ${image_ref}"
+        return 1
+    fi
+    return 0
+}
+
+container_exists() {
+    docker inspect -f '{{.Id}}' "$1" >/dev/null 2>&1
+}
+
+prompt_yes() {
+    local message="$1"
+    read -rp "${message} [y/N] " answer
+    if [[ "${answer}" =~ ^[Yy]$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+parse_args() {
+    local args=("$@")
+    local i=0
+    local token
+    local subcommand_seen=0
+
+    while ((i < ${#args[@]})); do
+        token="${args[i]}"
+        case "${token}" in
+            --)
+                extra_args+=("${args[@]:i+1}")
+                break
+                ;;
+            "${original_subcommand_token}")
+                if ((subcommand_seen == 0)); then
+                    subcommand_seen=1
+                    ((i++))
+                    continue
+                fi
+                ;;&
+            start|stop|remove)
+                extra_args+=("${token}")
+                ((i++))
+                ;;
+            -n|--name)
+                if [[ "${subcommand}" != "start" ]]; then
+                    print_error ""${token}" can only be used with the start subcommand"
+                    exit 1
+                fi
+                if ((i + 1 >= ${#args[@]})); then
+                    print_error ""${token}" requires a value"
+                    exit 1
+                fi
+                name_option_used=1
+                container_name="${args[i+1]}"
+                if [[ -z "${container_name}" ]]; then
+                    print_error "--name requires a non-empty value"
+                    exit 1
+                fi
+                ((i += 2))
+                ;;
+            --name=*)
+                if [[ "${subcommand}" != "start" ]]; then
+                    print_error ""${token%%=*}" can only be used with the start subcommand"
+                    exit 1
+                fi
+                name_option_used=1
+                container_name="${token#*=}"
+                if [[ -z "${container_name}" ]]; then
+                    print_error "--name requires a non-empty value"
+                    exit 1
+                fi
+                ((i++))
+                ;;
+            -k|--keep)
+                if [[ "${subcommand}" != "start" ]]; then
+                    print_error ""${token}" can only be used with the start subcommand"
+                    exit 1
+                fi
+                rm_enabled=0
+                keep_option_used=1
+                ((i++))
+                ;;
+            -t|--target)
+                if ((i + 1 >= ${#args[@]})); then
+                    print_error ""${token}" requires a value"
+                    exit 1
+                fi
+                target_name="${args[i+1]}"
+                if [[ -z "${target_name}" ]]; then
+                    print_error "--target requires a non-empty value"
+                    exit 1
+                fi
+                target_option_used=1
+                if [[ "${subcommand}" == "start" ]]; then
+                    exec_target_mode=1
+                fi
+                ((i += 2))
+                ;;
+            --target=*)
+                target_name="${token#*=}"
+                if [[ -z "${target_name}" ]]; then
+                    print_error "--target requires a non-empty value"
+                    exit 1
+                fi
+                target_option_used=1
+                if [[ "${subcommand}" == "start" ]]; then
+                    exec_target_mode=1
+                fi
+                ((i++))
+                ;;
+            -r|--remove)
+                if [[ "${subcommand}" != "stop" ]]; then
+                    print_error ""${token}" can only be used with the stop subcommand"
+                    exit 1
+                fi
+                stop_remove=1
+                ((i++))
+                ;;
+            -a|--all)
+                if [[ "${subcommand}" != "stop" ]]; then
+                    print_error ""${token}" can only be used with the stop subcommand"
+                    exit 1
+                fi
+                stop_all=1
+                ((i++))
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            -*)
+                print_error "Unknown option: ${token}"
+                exit 1
+                ;;
+            *)
+                extra_args+=("${token}")
+                ((i++))
+                ;;
+        esac
+    done
+}
+
+validate_args() {
+    if [[ "${subcommand}" == "start" ]]; then
+        if ((stop_all || stop_remove)); then
+            print_error "Stop-only options cannot be used with start"
+            exit 1
+        fi
+        if ((exec_target_mode)) && ((name_option_used)); then
+            print_error "Cannot combine --target with --name"
+            exit 1
+        fi
+        if ((exec_target_mode)) && ((keep_option_used)); then
+            print_error "Cannot combine --target with --keep"
+            exit 1
+        fi
+        return
+    fi
+
+    if (( ${#extra_args[@]} > 0 )); then
+        print_error "stop does not accept additional commands"
+        exit 1
+    fi
+    if ((stop_all)) && ((target_option_used)); then
+        print_error "Cannot combine --all with --target"
+        exit 1
+    fi
+    if ((remove_alias)) && ((target_option_used)); then
+        print_error "--target cannot be used with the remove subcommand"
+        exit 1
+    fi
+}
+
+start_with_exec() {
+    ensure_image_container_exists
+    if ! ensure_container_matches_image "${target_name}"; then
+        exit 1
+    fi
+    local status
+    status="$(container_status "${target_name}")"
+    if [[ "${status}" != "running" ]]; then
+        print_error "Container ${target_name} is not running"
+        exit 1
+    fi
+
+    local exec_cmd=(docker exec -it "${target_name}")
+    if ((${#extra_args[@]} > 0)); then
+        exec_cmd+=("${extra_args[@]}")
+    else
+        local default_cmd=(bash -lc 'tmux || bash')
+        exec_cmd+=("${default_cmd[@]}")
+    fi
+
+    exec "${exec_cmd[@]}"
+}
+
+start_with_docker_run() {
+    local existing_status=""
+    if container_exists "${container_name}"; then
+        if ! ensure_container_matches_image "${container_name}"; then
+            exit 1
+        fi
+        existing_status="$(container_status "${container_name}")"
+        if [[ "${existing_status}" == "running" ]]; then
+            if ! prompt_yes "${container_name} is running. Stop and restart it?"; then
+                echo "Cancelled"
+                exit 0
+            fi
+            docker stop "${container_name}" >/dev/null
+            existing_status="exited"
+        fi
+
+        if ((rm_enabled)); then
+            docker rm "${container_name}" >/dev/null 2>&1 || true
+        else
+            if [[ "${existing_status}" == "exited" ]]; then
+                if ((${#extra_args[@]} > 0)); then
+                    print_error "Cannot pass extra commands when reusing an existing container"
+                    exit 1
+                fi
+                echo "Reusing existing container ${container_name}"
+                exec docker start -ai "${container_name}"
+            fi
+            print_error "Container ${container_name} is kept without removal; delete it manually before retrying"
+            exit 1
+        fi
+    fi
+
+    local run_cmd=(docker run -it --name "${container_name}")
+    if ((rm_enabled)); then
+        run_cmd+=(--rm)
+    fi
+    run_cmd+=("${image_ref}")
+    if ((${#extra_args[@]} > 0)); then
+        run_cmd+=("${extra_args[@]}")
+    else
+        local default_cmd=(bash -lc 'tmux || bash')
+        run_cmd+=("${default_cmd[@]}")
+    fi
+
+    exec "${run_cmd[@]}"
+}
+
+start_command() {
+    if ((exec_target_mode)); then
+        start_with_exec
+    else
+        start_with_docker_run
+    fi
+}
+
+remove_after_stop() {
+    local name="$1"
+    if ! container_exists "${name}"; then
+        echo "Container ${name} has already been removed"
+        return
+    fi
+    local auto_remove
+    auto_remove="$(container_auto_remove "${name}")"
+    if [[ "${auto_remove}" == "true" ]]; then
+        echo "Container ${name} uses --rm and will delete itself when stopped"
+        return
+    fi
+    docker rm "${name}" >/dev/null
+    echo "Removed container ${name}"
+}
+
+stop_single_container() {
+    local name="$1"
+    local skip_image_check="${2:-0}"
+    if ((skip_image_check == 0)); then
+        ensure_image_container_exists
+    fi
+    if ! ensure_container_matches_image "${name}"; then
+        return
+    fi
+    local status
+    status="$(container_status "${name}")"
+    if [[ -z "${status}" ]]; then
+        print_error "Container ${name} does not exist"
+        return
+    fi
+    if [[ "${status}" == "running" ]]; then
+        docker stop "${name}" >/dev/null
+        echo "Stopped container ${name}"
+    else
+        echo "Container ${name} is not running"
+    fi
+    if ((stop_remove)); then
+        remove_after_stop "${name}"
+    fi
+}
+
+stop_all_containers() {
+    ensure_image_container_exists
+    local ids
+    mapfile -t ids < <(list_image_container_ids)
+    if ((${#ids[@]} == 0)); then
+        echo "No containers use the target image"
+        return
+    fi
+    local cid name
+    for cid in "${ids[@]}"; do
+        [[ -z "${cid}" ]] && continue
+        name="$(docker inspect -f '{{.Name}}' "${cid}" 2>/dev/null | sed 's#^/##')"
+        if [[ -z "${name}" ]]; then
+            continue
+        fi
+        stop_single_container "${name}" 1
+    done
+}
+
+stop_command() {
+    if ((stop_all)); then
+        stop_all_containers
+    else
+        stop_single_container "${target_name}" 0
+    fi
+}
+
+main() {
+    original_subcommand_token="$(detect_subcommand "$@")"
+    subcommand="${original_subcommand_token}"
+    stop_all=0
+    stop_remove=0
+    remove_alias=0
+    if [[ "${subcommand}" == "remove" ]]; then
+        subcommand="stop"
+        stop_all=1
+        stop_remove=1
+        remove_alias=1
+    fi
+
+    container_name="${default_container_name}"
+    target_name="${default_container_name}"
+    rm_enabled=1
+    exec_target_mode=0
+    extra_args=()
+    name_option_used=0
+    keep_option_used=0
+    target_option_used=0
+
+    parse_args "$@"
+    validate_args
+
+    case "${subcommand}" in
+        start)
+            start_command
+            ;;
+        stop)
+            stop_command
+            ;;
+        *)
+            print_error "Unknown subcommand: ${subcommand}"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
