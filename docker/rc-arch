@@ -3,6 +3,7 @@ set -euo pipefail
 
 image_ref="ghcr.io/recelsus-config/rc-arch:latest"
 default_container_name="rc-arch"
+pull_upgrade=0
 
 usage() {
     cat <<'USAGE'
@@ -15,6 +16,7 @@ Subcommands:
   (default) / start   : run a new container or attach to an existing one
   stop             : stop the target container (optionally remove it)
   remove           : stop and remove every container created from the rc-arch image (same as stop --all --remove)
+  pull             : pull the rc-arch image (use --upgrade to refresh)
 
 Shared options:
   -t, --target NAME  set the target container name (default: rc-arch)
@@ -27,6 +29,9 @@ Start options:
 Stop options:
   -a, --all          act on every container created from the rc-arch image
   -r, --remove       remove containers after stopping (auto for --rm runs)
+
+Pull options:
+  -u, --upgrade      stop/remove all rc-arch containers, delete the local image, then pull again
 
 Arguments after -- execute inside the container; if omitted the wrapper runs "tmux || bash".
 USAGE
@@ -46,13 +51,13 @@ detect_subcommand() {
                 break
                 ;;
             -n|--name|-t|--target)
-                ((i++))
+                ((++i))
                 ;;
             --name=*|--target=*)
                 ;;
             -k|-r|-a|--keep|--remove|--all|-h|--help)
                 ;;
-            start|stop|remove)
+            start|stop|remove|pull)
                 echo "${token}"
                 return
                 ;;
@@ -123,13 +128,13 @@ parse_args() {
             "${original_subcommand_token}")
                 if ((subcommand_seen == 0)); then
                     subcommand_seen=1
-                    ((i++))
+                    ((++i))
                     continue
                 fi
                 ;;&
             start|stop|remove)
                 extra_args+=("${token}")
-                ((i++))
+                ((++i))
                 ;;
             -n|--name)
                 if [[ "${subcommand}" != "start" ]]; then
@@ -159,7 +164,7 @@ parse_args() {
                     print_error "--name requires a non-empty value"
                     exit 1
                 fi
-                ((i++))
+                ((++i))
                 ;;
             -k|--keep)
                 if [[ "${subcommand}" != "start" ]]; then
@@ -168,9 +173,13 @@ parse_args() {
                 fi
                 rm_enabled=0
                 keep_option_used=1
-                ((i++))
+                ((++i))
                 ;;
             -t|--target)
+                if [[ "${subcommand}" == "pull" ]]; then
+                    print_error "--target cannot be used with the pull subcommand"
+                    exit 1
+                fi
                 if ((i + 1 >= ${#args[@]})); then
                     print_error ""${token}" requires a value"
                     exit 1
@@ -187,6 +196,10 @@ parse_args() {
                 ((i += 2))
                 ;;
             --target=*)
+                if [[ "${subcommand}" == "pull" ]]; then
+                    print_error "--target cannot be used with the pull subcommand"
+                    exit 1
+                fi
                 target_name="${token#*=}"
                 if [[ -z "${target_name}" ]]; then
                     print_error "--target requires a non-empty value"
@@ -196,7 +209,7 @@ parse_args() {
                 if [[ "${subcommand}" == "start" ]]; then
                     exec_target_mode=1
                 fi
-                ((i++))
+                ((++i))
                 ;;
             -r|--remove)
                 if [[ "${subcommand}" != "stop" ]]; then
@@ -204,7 +217,7 @@ parse_args() {
                     exit 1
                 fi
                 stop_remove=1
-                ((i++))
+                ((++i))
                 ;;
             -a|--all)
                 if [[ "${subcommand}" != "stop" ]]; then
@@ -212,7 +225,15 @@ parse_args() {
                     exit 1
                 fi
                 stop_all=1
-                ((i++))
+                ((++i))
+                ;;
+            -u|--upgrade)
+                if [[ "${subcommand}" != "pull" ]]; then
+                    print_error ""${token}" can only be used with the pull subcommand"
+                    exit 1
+                fi
+                pull_upgrade=1
+                ((++i))
                 ;;
             -h|--help)
                 usage
@@ -224,7 +245,7 @@ parse_args() {
                 ;;
             *)
                 extra_args+=("${token}")
-                ((i++))
+                ((++i))
                 ;;
         esac
     done
@@ -247,17 +268,32 @@ validate_args() {
         return
     fi
 
-    if (( ${#extra_args[@]} > 0 )); then
-        print_error "stop does not accept additional commands"
-        exit 1
+    if [[ "${subcommand}" == "pull" ]]; then
+        if (( ${#extra_args[@]} > 0 )); then
+            print_error "pull does not accept additional commands"
+            exit 1
+        fi
+        if ((target_option_used || name_option_used || keep_option_used || stop_all || stop_remove)); then
+            print_error "pull cannot combine start/stop-specific options"
+            exit 1
+        fi
+        return
     fi
-    if ((stop_all)) && ((target_option_used)); then
-        print_error "Cannot combine --all with --target"
-        exit 1
-    fi
-    if ((remove_alias)) && ((target_option_used)); then
-        print_error "--target cannot be used with the remove subcommand"
-        exit 1
+
+    if [[ "${subcommand}" == "stop" ]]; then
+        if (( ${#extra_args[@]} > 0 )); then
+            print_error "stop does not accept additional commands"
+            exit 1
+        fi
+        if ((stop_all)) && ((target_option_used)); then
+            print_error "Cannot combine --all with --target"
+            exit 1
+        fi
+        if ((remove_alias)) && ((target_option_used)); then
+            print_error "--target cannot be used with the remove subcommand"
+            exit 1
+        fi
+        return
     fi
 }
 
@@ -408,6 +444,64 @@ stop_command() {
     fi
 }
 
+ensure_no_image_containers_remain() {
+    if [[ -n "$(list_image_container_ids)" ]]; then
+        print_error "Some containers created from ${image_ref} are still present"
+        exit 1
+    fi
+}
+
+stop_and_remove_all_containers_for_upgrade() {
+    mapfile -t ids < <(list_image_container_ids)
+    if ((${#ids[@]} == 0)); then
+        echo "No containers need to be stopped before upgrading"
+        return
+    fi
+    local names=()
+    echo "Containers created from ${image_ref} will be stopped and removed before upgrading:"
+    local cid name
+    for cid in "${ids[@]}"; do
+        [[ -z "${cid}" ]] && continue
+        name="$(docker inspect -f '{{.Name}}' "${cid}" 2>/dev/null | sed 's#^/##')"
+        if [[ -z "${name}" ]]; then
+            continue
+        fi
+        echo "  - ${name}"
+        names+=("${name}")
+    done
+    if ((${#names[@]} == 0)); then
+        echo "No containers need to be stopped before upgrading"
+        return
+    fi
+    if ! prompt_yes "Stop and remove these containers now?"; then
+        echo "Cancelled"
+        exit 0
+    fi
+    local previous_stop_remove="${stop_remove}"
+    stop_remove=1
+    for name in "${names[@]}"; do
+        stop_single_container "${name}" 1
+    done
+    stop_remove="${previous_stop_remove}"
+    ensure_no_image_containers_remain
+}
+
+remove_local_image_for_upgrade() {
+    if docker image inspect "${image_ref}" >/dev/null 2>&1; then
+        docker rmi "${image_ref}"
+    else
+        echo "Image ${image_ref} is not cached locally; skipping docker rmi"
+    fi
+}
+
+pull_command() {
+    if ((pull_upgrade)); then
+        stop_and_remove_all_containers_for_upgrade
+        remove_local_image_for_upgrade
+    fi
+    docker pull "${image_ref}"
+}
+
 main() {
     original_subcommand_token="$(detect_subcommand "$@")"
     subcommand="${original_subcommand_token}"
@@ -429,6 +523,7 @@ main() {
     name_option_used=0
     keep_option_used=0
     target_option_used=0
+    pull_upgrade=0
 
     parse_args "$@"
     validate_args
@@ -439,6 +534,9 @@ main() {
             ;;
         stop)
             stop_command
+            ;;
+        pull)
+            pull_command
             ;;
         *)
             print_error "Unknown subcommand: ${subcommand}"
