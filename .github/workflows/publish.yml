@@ -9,6 +9,8 @@ on:
       - config
       - .github/workflows/publish.yml
   workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * 0'
 
 jobs:
   build-and-push:
@@ -33,3 +35,4 @@ jobs:
           IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/rc-arch
           docker build -t $IMAGE_NAME:latest -f docker/Dockerfile .
           docker push $IMAGE_NAME:latest
+
