@@ -1,0 +1,586 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+image_ref="ghcr.io/recelsus-config/rc-arch:latest"
+default_container_name="rc-arch"
+rm_container_name="rc-arch-test"
+default_shell="/bin/bash"
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/rc-arch"
+config_file="${config_dir}/rc-arch.conf"
+
+usage() {
+    cat <<'USAGE'
+rc-arch Docker wrapper
+
+Usage:
+  rc-arch help
+  rc-arch exec [-n NAME|--name NAME] [-- CMD...]
+  rc-arch run [--no-config] [-n NAME|--name NAME] [--network NETWORK] [--rm] [-p SPEC|--port SPEC]... [-v SPEC|--volume SPEC]... [-- CMD...]
+  rc-arch stop [-n NAME|--name NAME] [--remove]
+  rc-arch stop --all [--remove]
+  rc-arch remove [-n NAME|--name NAME]
+  rc-arch remove --all
+  rc-arch pull
+
+Subcommands:
+  help     Show this help
+  exec     Execute a command in an existing running rc-arch container
+  run      Start a new rc-arch container
+  stop     Stop one or more rc-arch containers
+  remove   Stop and remove one or more rc-arch containers
+  pull     Pull the latest rc-arch image
+
+Exec options:
+  -n, --name NAME      Target container name (default: rc-arch)
+
+Run options:
+  -n, --name NAME      Container name (default: rc-arch)
+      --network NAME   Docker network name
+      --no-config      Ignore ~/.config/rc-arch/rc-arch.conf
+      --rm             Use auto-remove and force the container name rc-arch-test
+  -p, --port SPEC      Publish a port mapping (repeatable)
+  -v, --volume SPEC    Bind a volume mount (repeatable)
+
+Stop options:
+  -n, --name NAME      Target container name (default: rc-arch)
+      --all            Target every existing container created from the rc-arch image
+      --remove         Remove containers after stopping them
+
+Remove options:
+  -n, --name NAME      Target container name (default: rc-arch)
+      --all            Target every existing container created from the rc-arch image
+
+Notes:
+  - Without a subcommand, rc-arch shows this help.
+  - exec defaults to /bin/bash when no command is provided.
+  - run defaults to /bin/bash when no command is provided.
+  - --rm cannot be combined with --name/-n.
+  - run reads ${XDG_CONFIG_HOME:-$HOME/.config}/rc-arch/rc-arch.conf when present.
+USAGE
+}
+
+print_error() {
+    echo "Error: $1" >&2
+}
+
+container_exists() {
+    docker inspect -f '{{.Id}}' "$1" >/dev/null 2>&1
+}
+
+container_status() {
+    docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null || true
+}
+
+ensure_container_matches_image() {
+    local name="$1"
+    local config_image
+    config_image="$(docker inspect -f '{{.Config.Image}}' "${name}" 2>/dev/null)" || {
+        print_error "Container ${name} does not exist"
+        return 1
+    }
+    if [[ "${config_image}" != "${image_ref}" ]]; then
+        print_error "Container ${name} was created from ${config_image}, not ${image_ref}"
+        return 1
+    fi
+}
+
+list_image_container_names() {
+    local ids
+    mapfile -t ids < <(docker ps -aq --filter "ancestor=${image_ref}")
+    local cid name
+    for cid in "${ids[@]}"; do
+        [[ -z "${cid}" ]] && continue
+        name="$(docker inspect -f '{{.Name}}' "${cid}" 2>/dev/null | sed 's#^/##')"
+        [[ -n "${name}" ]] && echo "${name}"
+    done
+}
+
+prompt_yes() {
+    local message="$1"
+    local answer
+    read -rp "${message} [y/N] " answer
+    [[ "${answer}" =~ ^[Yy]$ ]]
+}
+
+prompt_for_container_name() {
+    local name
+    while true; do
+        read -rp "New container name: " name
+        if [[ -z "${name}" ]]; then
+            echo "Container name cannot be empty"
+            continue
+        fi
+        if container_exists "${name}"; then
+            echo "Container ${name} already exists"
+            continue
+        fi
+        echo "${name}"
+        return
+    done
+}
+
+validate_env_name() {
+    [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
+}
+
+load_run_config() {
+    config_env_names=()
+    config_env_values=()
+    config_ports=()
+    config_volumes=()
+    config_network=""
+
+    if [[ ! -f "${config_file}" ]]; then
+        return
+    fi
+
+    local -a RC_ARCH_ENV_NAMES=()
+    local -a RC_ARCH_ENV_VALUES=()
+    local -a RC_ARCH_PORTS=()
+    local -a RC_ARCH_VOLUMES=()
+    local RC_ARCH_NETWORK=""
+
+    # shellcheck disable=SC1090
+    source "${config_file}"
+
+    config_env_names=("${RC_ARCH_ENV_NAMES[@]}")
+    config_env_values=("${RC_ARCH_ENV_VALUES[@]}")
+    config_ports=("${RC_ARCH_PORTS[@]}")
+    config_volumes=("${RC_ARCH_VOLUMES[@]}")
+    config_network="${RC_ARCH_NETWORK}"
+}
+
+run_exec() {
+    local name="${default_container_name}"
+    local cmd=()
+    local parsing_options=1
+
+    while (($# > 0)); do
+        if ((parsing_options == 1)); then
+            case "$1" in
+                --)
+                    parsing_options=0
+                    shift
+                    continue
+                    ;;
+                -n|--name)
+                    if (($# < 2)); then
+                        print_error "$1 requires a value"
+                        exit 1
+                    fi
+                    name="$2"
+                    shift 2
+                    continue
+                    ;;
+                --name=*)
+                    name="${1#*=}"
+                    shift
+                    continue
+                    ;;
+                -h|--help)
+                    usage
+                    exit 0
+                    ;;
+                -*)
+                    print_error "Unknown option for exec: $1"
+                    exit 1
+                    ;;
+            esac
+        fi
+        cmd+=("$1")
+        shift
+    done
+
+    if [[ -z "${name}" ]]; then
+        print_error "--name requires a non-empty value"
+        exit 1
+    fi
+
+    if ! container_exists "${name}"; then
+        print_error "Container ${name} does not exist"
+        exit 1
+    fi
+    ensure_container_matches_image "${name}" || exit 1
+
+    if [[ "$(container_status "${name}")" != "running" ]]; then
+        print_error "Container ${name} is not running"
+        exit 1
+    fi
+
+    if ((${#cmd[@]} == 0)); then
+        cmd=("${default_shell}")
+    fi
+
+    exec docker exec -it "${name}" "${cmd[@]}"
+}
+
+run_run() {
+    local name="${default_container_name}"
+    local network_name=""
+    local network_set=0
+    local use_config=1
+    local use_rm=0
+    local name_explicit=0
+    local cmd=()
+    local parsing_options=1
+    local ports=()
+    local volumes=()
+    local config_env_names=()
+    local config_env_values=()
+    local config_ports=()
+    local config_volumes=()
+    local config_network=""
+
+    while (($# > 0)); do
+        if ((parsing_options == 1)); then
+            case "$1" in
+                --)
+                    parsing_options=0
+                    shift
+                    continue
+                    ;;
+                -n|--name)
+                    if (($# < 2)); then
+                        print_error "$1 requires a value"
+                        exit 1
+                    fi
+                    name="$2"
+                    name_explicit=1
+                    shift 2
+                    continue
+                    ;;
+                --name=*)
+                    name="${1#*=}"
+                    name_explicit=1
+                    shift
+                    continue
+                    ;;
+                --network)
+                    if (($# < 2)); then
+                        print_error "--network requires a value"
+                        exit 1
+                    fi
+                    network_name="$2"
+                    network_set=1
+                    shift 2
+                    continue
+                    ;;
+                --network=*)
+                    network_name="${1#*=}"
+                    network_set=1
+                    shift
+                    continue
+                    ;;
+                --no-config)
+                    use_config=0
+                    shift
+                    continue
+                    ;;
+                --rm)
+                    use_rm=1
+                    shift
+                    continue
+                    ;;
+                -p|--port)
+                    if (($# < 2)); then
+                        print_error "$1 requires a value"
+                        exit 1
+                    fi
+                    ports+=("$2")
+                    shift 2
+                    continue
+                    ;;
+                --port=*)
+                    ports+=("${1#*=}")
+                    shift
+                    continue
+                    ;;
+                -v|--volume)
+                    if (($# < 2)); then
+                        print_error "$1 requires a value"
+                        exit 1
+                    fi
+                    volumes+=("$2")
+                    shift 2
+                    continue
+                    ;;
+                --volume=*)
+                    volumes+=("${1#*=}")
+                    shift
+                    continue
+                    ;;
+                -h|--help)
+                    usage
+                    exit 0
+                    ;;
+                -*)
+                    print_error "Unknown option for run: $1"
+                    exit 1
+                    ;;
+            esac
+        fi
+        cmd+=("$1")
+        shift
+    done
+
+    if ((use_config == 1)); then
+        load_run_config
+    fi
+
+    if ((use_rm == 1)) && ((name_explicit == 1)); then
+        print_error "--rm cannot be combined with --name"
+        exit 1
+    fi
+
+    if ((use_rm == 1)); then
+        name="${rm_container_name}"
+    fi
+
+    if [[ -z "${name}" ]]; then
+        print_error "--name requires a non-empty value"
+        exit 1
+    fi
+    if ((network_set == 0)) && [[ -n "${config_network}" ]]; then
+        network_name="${config_network}"
+        network_set=1
+    fi
+    if ((network_set == 1)) && [[ -z "${network_name}" ]]; then
+        print_error "--network requires a non-empty value"
+        exit 1
+    fi
+
+    if container_exists "${name}"; then
+        if ((use_rm == 1)); then
+            print_error "Container ${name} already exists"
+            exit 1
+        fi
+        if ((name_explicit == 1)); then
+            print_error "Container ${name} already exists"
+            exit 1
+        fi
+        if ! prompt_yes "Container ${name} already exists. Enter a different name?"; then
+            echo "Cancelled"
+            exit 0
+        fi
+        name="$(prompt_for_container_name)"
+    fi
+
+    if ((${#cmd[@]} == 0)); then
+        cmd=("${default_shell}")
+    fi
+
+    local docker_cmd=(docker run -it --name "${name}")
+    if ((use_rm == 1)); then
+        docker_cmd+=(--rm)
+    fi
+    if [[ -n "${network_name}" ]]; then
+        docker_cmd+=(--network "${network_name}")
+    fi
+
+    local spec
+    local env_name
+    local env_assignment
+    for env_name in "${config_env_names[@]}"; do
+        if ! validate_env_name "${env_name}"; then
+            print_error "Invalid env name in ${config_file}: ${env_name}"
+            exit 1
+        fi
+        if printenv "${env_name}" >/dev/null 2>&1; then
+            docker_cmd+=(-e "${env_name}")
+        fi
+    done
+    for env_assignment in "${config_env_values[@]}"; do
+        if [[ "${env_assignment}" != *=* ]]; then
+            print_error "Invalid env assignment in ${config_file}: ${env_assignment}"
+            exit 1
+        fi
+        env_name="${env_assignment%%=*}"
+        if ! validate_env_name "${env_name}"; then
+            print_error "Invalid env name in ${config_file}: ${env_name}"
+            exit 1
+        fi
+        docker_cmd+=(-e "${env_assignment}")
+    done
+    for spec in "${config_ports[@]}"; do
+        if [[ -z "${spec}" ]]; then
+            print_error "Config port entry in ${config_file} cannot be empty"
+            exit 1
+        fi
+        docker_cmd+=(-p "${spec}")
+    done
+    for spec in "${ports[@]}"; do
+        if [[ -z "${spec}" ]]; then
+            print_error "--port requires a non-empty value"
+            exit 1
+        fi
+        docker_cmd+=(-p "${spec}")
+    done
+    for spec in "${config_volumes[@]}"; do
+        if [[ -z "${spec}" ]]; then
+            print_error "Config volume entry in ${config_file} cannot be empty"
+            exit 1
+        fi
+        docker_cmd+=(-v "${spec}")
+    done
+    for spec in "${volumes[@]}"; do
+        if [[ -z "${spec}" ]]; then
+            print_error "--volume requires a non-empty value"
+            exit 1
+        fi
+        docker_cmd+=(-v "${spec}")
+    done
+
+    docker_cmd+=("${image_ref}")
+    docker_cmd+=("${cmd[@]}")
+
+    exec "${docker_cmd[@]}"
+}
+
+remove_after_stop() {
+    local name="$1"
+    if ! container_exists "${name}"; then
+        echo "Container ${name} has already been removed"
+        return
+    fi
+    docker rm "${name}" >/dev/null
+    echo "Removed container ${name}"
+}
+
+stop_single_container() {
+    local name="$1"
+    local remove_after="${2:-0}"
+
+    if ! container_exists "${name}"; then
+        print_error "Container ${name} does not exist"
+        return 1
+    fi
+    ensure_container_matches_image "${name}" || return 1
+
+    if [[ "$(container_status "${name}")" == "running" ]]; then
+        docker stop "${name}" >/dev/null
+        echo "Stopped container ${name}"
+    else
+        echo "Container ${name} is not running"
+    fi
+
+    if ((remove_after == 1)); then
+        remove_after_stop "${name}"
+    fi
+}
+
+run_stop_like() {
+    local remove_after="$1"
+    shift
+
+    local name="${default_container_name}"
+    local stop_all=0
+    local name_explicit=0
+
+    while (($# > 0)); do
+        case "$1" in
+            -n|--name)
+                if (($# < 2)); then
+                    print_error "$1 requires a value"
+                    exit 1
+                fi
+                name="$2"
+                name_explicit=1
+                shift 2
+                ;;
+            --name=*)
+                name="${1#*=}"
+                name_explicit=1
+                shift
+                ;;
+            --all)
+                stop_all=1
+                shift
+                ;;
+            --remove)
+                remove_after=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                print_error "Unknown option for stop/remove: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ -z "${name}" ]]; then
+        print_error "--name requires a non-empty value"
+        exit 1
+    fi
+    if ((stop_all == 1)) && ((name_explicit == 1)); then
+        print_error "--all cannot be combined with --name"
+        exit 1
+    fi
+
+    if ((stop_all == 1)); then
+        local names=()
+        mapfile -t names < <(list_image_container_names)
+        if ((${#names[@]} == 0)); then
+            echo "No containers use the target image"
+            return
+        fi
+        local container_name
+        for container_name in "${names[@]}"; do
+            stop_single_container "${container_name}" "${remove_after}" || true
+        done
+        return
+    fi
+
+    stop_single_container "${name}" "${remove_after}"
+}
+
+run_pull() {
+    if (($# > 0)); then
+        print_error "pull does not accept any arguments"
+        exit 1
+    fi
+    exec docker pull "${image_ref}"
+}
+
+main() {
+    if (($# == 0)); then
+        usage
+        exit 0
+    fi
+
+    case "$1" in
+        help|-h|--help)
+            usage
+            ;;
+        exec)
+            shift
+            run_exec "$@"
+            ;;
+        run)
+            shift
+            run_run "$@"
+            ;;
+        stop)
+            shift
+            run_stop_like 0 "$@"
+            ;;
+        remove)
+            shift
+            run_stop_like 1 "$@"
+            ;;
+        pull)
+            shift
+            run_pull "$@"
+            ;;
+        *)
+            print_error "Unknown subcommand: $1"
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

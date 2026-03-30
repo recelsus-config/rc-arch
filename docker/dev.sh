@@ -2,21 +2,14 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-project_dir="$(cd "${script_dir}/.." && pwd)"
 compose_file="${script_dir}/docker-compose.dev.yml"
-env_file="${project_dir}/.env"
 
 if [ ! -f "${compose_file}" ]; then
     echo "compose file not found: ${compose_file}" >&2
     exit 1
 fi
 
-if [ ! -f "${env_file}" ]; then
-    echo "env file not found: ${env_file}" >&2
-    exit 1
-fi
-
-compose_cmd=(docker compose -f "${compose_file}" --env-file "${env_file}")
+compose_cmd=(docker compose -f "${compose_file}")
 
 existing_container="$(${compose_cmd[@]} ps -q || true)"
 

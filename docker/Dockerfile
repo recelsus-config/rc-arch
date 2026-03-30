@@ -5,11 +5,11 @@ ENV TERM=xterm-256color \
     SHELL=/bin/bash \
     SSH_CONNECTION=1
 
-COPY config /tmp/config
+COPY build.config /tmp/build.config
 
 RUN set -eux; \
     pacman -Syu --noconfirm && \
-    source /tmp/config && \
+    source /tmp/build.config && \
     pacman -S --noconfirm --needed sudo git base-devel "${INSTALL_PACKAGES[@]}" && \
     groupadd -g 1000 arch && \
     useradd -m -u 1000 -g arch -s /bin/bash arch && \
@@ -19,7 +19,7 @@ RUN set -eux; \
     git clone https://github.com/${CONFIG_REPO_BASH}.git /home/arch/.config/bash && \
     echo 'source ~/.config/bash/bashrc' >> /home/arch/.bashrc && \
     chown -R arch:arch /home/arch/.config /home/arch/.bashrc && \
-    rm -f /tmp/config && \
+    rm -f /tmp/build.config && \
     pacman -Scc --noconfirm && \
     rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
 

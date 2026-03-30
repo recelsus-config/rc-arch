@@ -7,8 +7,6 @@ services:
     container_name: rc-arch
     tty: true
     stdin_open: true
-    env_file:
-      - ../.env
     volumes:
       - ../data:/home/arch/data
       - ~/.ssh:/home/arch/.ssh:ro

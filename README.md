@@ -1,89 +1,131 @@
-## 🐧 rc-arch: Arch Linux Development Container
+## rc-arch
 
-### ✅ Installation
+`ghcr.io/recelsus-config/rc-arch:latest` を使って再展開可能な Arch Linux 開発コンテナを扱うためのリポジトリです。
+
+このリポジトリには以下が含まれます。
+
+- イメージのビルド定義: [`docker/Dockerfile`](docker/Dockerfile)
+- ビルド時設定: [`build.config`](build.config)
+- 実行用ラッパースクリプト: [`rc-arch`](rc-arch)
+- 実行時設定の例: [`rc-arch.config.example`](rc-arch.config.example)
+
+### Image
 
 ```bash
 docker pull ghcr.io/recelsus-config/rc-arch:latest
 ```
 
-### ✅ Usage (with Docker Compose)
+### rc-arch
 
-1. Make sure `docker-compose.yaml` is available in the project root (already included).
-2. Start the container in the background:
-
-```bash
-docker compose up -d
-```
-
-3. Attach to the running `tmux` session:
+`rc-arch` は対象イメージ専用の薄い Docker ラッパーです。
 
 ```bash
-docker exec -it rc-arch tmux
-docker exec -it rc-arch tmux a
-git-update # automated git pull bash & tmux & nvim config
+rc-arch help
+rc-arch run
+rc-arch exec
+rc-arch stop
+rc-arch remove
+rc-arch pull
 ```
 
-* The container remains active thanks to `tmux` running as the main process.
-* You can create or switch sessions manually using `tmux new -As dev` or similar.
+主なコマンド:
 
----
+- `rc-arch run`
+  新しいコンテナを起動します。コマンド省略時は `/bin/bash` を実行します。
+- `rc-arch exec`
+  既存の起動中コンテナに入ります。コマンド省略時は `/bin/bash` を実行します。
+- `rc-arch stop`
+  既存コンテナを停止します。`--remove` 付きで停止後に削除します。
+- `rc-arch remove`
+  停止して削除します。`stop --remove` の別導線です。
+- `rc-arch pull`
+  最新イメージを `docker pull` します。
 
-## 🧰 Features
+よく使う例:
 
-* 🛠️ **Pre-installed development tools**, including:
-  * `neovim`, `tmux`, `ripgrep`, `fzf`, `fd`, `jq`, `less`
-  * `cmake`, `make`, `clang`, `nodejs`, `npm`, `curl`, `wget`
-  * `rustup`, `conan`, `paru`
-* 👤 **Non-root user (`arch`) with passwordless sudo**
-* 🧩 **Automatically clones configuration files** for:
-  * `nvim`, `tmux`, and `bash` from your GitHub repositories
-* 🧾 **Custom `.bashrc` sourced automatically**
+```bash
+rc-arch run
+rc-arch run -n work
+rc-arch run --rm
+rc-arch run --network mynet -p 3000:3000 -v "$PWD:/workspace"
+rc-arch exec
+rc-arch exec -n work
+rc-arch stop --remove
+rc-arch stop --all --remove
+```
 
----
+### Runtime Config
 
-## 📦 Included Packages
+`rc-arch run` は、存在する場合だけ `~/.config/rc-arch/rc-arch.conf` を読み込みます。
+ファイルがなければそのまま通常起動します。設定を無視したい場合は `--no-config` を使います。
 
-* git
-* neovim
-* tmux
-* bash
-* ripgrep
-* fzf
-* fd
-* cmake
-* make
-* clang
-* nodejs
-* npm
-* jq
-* less
-* curl
-* wget
-* rustup
-* conan
-* paru
+この設定では次を事前定義できます。
 
----
+- `RC_ARCH_ENV_NAMES`
+  ホスト環境からコンテナへ受け渡してよい env 名
+- `RC_ARCH_ENV_VALUES`
+  コンテナ内へ固定値で設定する `NAME=value`
+- `RC_ARCH_NETWORK`
+  既定の `--network`
+- `RC_ARCH_PORTS`
+  既定の `-p`
+- `RC_ARCH_VOLUMES`
+  既定の `-v`
 
-## 📝 Notes
+優先順位:
 
-* The container is based on [`archlinux:latest`](https://hub.docker.com/_/archlinux).
-* Builds and pushes to [GitHub Container Registry (GHCR)](https://ghcr.io) are automated via GitHub Actions.
-* Configuration repositories are expected to be public or accessible via HTTPS.
-* The container now includes `rustup`, `conan`, and `paru` for enhanced development capabilities.
+- `RC_ARCH_ENV_VALUES` は同名の `RC_ARCH_ENV_NAMES` より優先されます
+- `--network` は `RC_ARCH_NETWORK` より優先されます
+- `-p` と `-v` は config の値に追加されます
 
----
+設定例:
 
-Let me know if you'd like to include:
+```bash
+mkdir -p ~/.config/rc-arch
+cp /home/reg/Project/rc-arch/rc-arch.config.example ~/.config/rc-arch/rc-arch.conf
+```
 
-* A sample `docker-compose.yml`
-* Preconfigured `tmux.conf` behavior
-* Shared volumes for host-container integration
+例:
 
-Happy to help tailor it for team collaboration or onboarding documentation!
+```bash
+RC_ARCH_ENV_NAMES=(
+    OPENAI_API_KEY
+)
 
-## 🚀 Development Environment Setup
+RC_ARCH_ENV_VALUES=(
+    "OPENAI_BASE_URL=https://example.invalid/v1"
+)
 
-The container comes with `rustup` and `conan` pre-installed. After attaching to the container, you can use these tools directly.  `paru` is also installed for AUR package management.
+RC_ARCH_NETWORK="devnet"
 
----
+RC_ARCH_PORTS=(
+    "3000:3000"
+)
+
+RC_ARCH_VOLUMES=(
+    "$HOME/.ssh:/home/arch/.ssh:ro"
+    "$PWD:/workspace"
+)
+```
+
+この場合:
+
+- ホストにある `OPENAI_API_KEY` はコンテナへ引き継がれます
+- `OPENAI_BASE_URL` はコンテナ内だけ固定値になります
+- `.ssh` や作業ディレクトリのマウント、既定ネットワーク、ポート公開も自動で付きます
+
+### Build Config
+
+[`build.config`](build.config) は Docker イメージのビルド時設定です。
+ここではインストールするパッケージや、コンテナ内へ clone する設定リポジトリを定義しています。
+
+```bash
+docker build -f docker/Dockerfile -t rc-arch .
+```
+
+### Notes
+
+- ベースイメージは `archlinux:latest` です
+- コンテナ内ユーザーは `arch` です
+- UID/GID は `1000` 固定です
+- `rc-arch` が対象にするのは `ghcr.io/recelsus-config/rc-arch:latest` 由来のコンテナです

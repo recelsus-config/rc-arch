@@ -2,8 +2,8 @@
 set -euo pipefail
 
 user_name="arch"
-desired_uid="${USER_UID:-1000}"
-desired_gid="${USER_GID:-1000}"
+desired_uid="1000"
+desired_gid="1000"
 
 if ! id "${user_name}" >/dev/null 2>&1; then
     echo "expected user not found: ${user_name}" >&2
