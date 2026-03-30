@@ -5,6 +5,7 @@ image_ref="ghcr.io/recelsus-config/rc-arch:latest"
 default_container_name="rc-arch"
 rm_container_name="rc-arch-test"
 default_shell="/bin/bash"
+detach_keys="ctrl-\\"
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/rc-arch"
 config_file="${config_dir}/rc-arch.conf"
 
@@ -15,7 +16,7 @@ rc-arch Docker wrapper
 Usage:
   rc-arch help
   rc-arch exec [-n NAME|--name NAME] [-- CMD...]
-  rc-arch run [--no-config] [-n NAME|--name NAME] [--network NETWORK] [--rm] [-p SPEC|--port SPEC]... [-v SPEC|--volume SPEC]... [-- CMD...]
+  rc-arch run [--no-config] [--host-uid] [-n NAME|--name NAME] [--network NETWORK] [--rm] [-p SPEC|--port SPEC]... [-v SPEC|--volume SPEC]... [-- CMD...]
   rc-arch stop [-n NAME|--name NAME] [--remove]
   rc-arch stop --all [--remove]
   rc-arch remove [-n NAME|--name NAME]
@@ -35,6 +36,7 @@ Exec options:
 
 Run options:
   -n, --name NAME      Container name (default: rc-arch)
+      --host-uid       Pass the current host uid as USER_UID
       --network NAME   Docker network name
       --no-config      Ignore ~/.config/rc-arch/rc-arch.conf
       --rm             Use auto-remove and force the container name rc-arch-test
@@ -52,10 +54,12 @@ Remove options:
 
 Notes:
   - Without a subcommand, rc-arch shows this help.
+  - run and exec use --detach-keys "ctrl-\\".
   - exec defaults to /bin/bash when no command is provided.
   - run defaults to /bin/bash when no command is provided.
   - --rm cannot be combined with --name/-n.
   - run reads ${XDG_CONFIG_HOME:-$HOME/.config}/rc-arch/rc-arch.conf when present.
+  - --host-uid overrides USER_UID from the runtime config.
 USAGE
 }
 
@@ -211,7 +215,7 @@ run_exec() {
         cmd=("${default_shell}")
     fi
 
-    exec docker exec -it "${name}" "${cmd[@]}"
+    exec docker exec --detach-keys "${detach_keys}" -it "${name}" "${cmd[@]}"
 }
 
 run_run() {
@@ -219,6 +223,7 @@ run_run() {
     local network_name=""
     local network_set=0
     local use_config=1
+    local use_host_uid=0
     local use_rm=0
     local name_explicit=0
     local cmd=()
@@ -268,6 +273,11 @@ run_run() {
                 --network=*)
                     network_name="${1#*=}"
                     network_set=1
+                    shift
+                    continue
+                    ;;
+                --host-uid)
+                    use_host_uid=1
                     shift
                     continue
                     ;;
@@ -369,7 +379,7 @@ run_run() {
         cmd=("${default_shell}")
     fi
 
-    local docker_cmd=(docker run -it --name "${name}")
+    local docker_cmd=(docker run --detach-keys "${detach_keys}" -it --name "${name}")
     if ((use_rm == 1)); then
         docker_cmd+=(--rm)
     fi
@@ -401,6 +411,9 @@ run_run() {
         fi
         docker_cmd+=(-e "${env_assignment}")
     done
+    if ((use_host_uid == 1)); then
+        docker_cmd+=(-e "USER_UID=$(id -u)")
+    fi
     for spec in "${config_ports[@]}"; do
         if [[ -z "${spec}" ]]; then
             print_error "Config port entry in ${config_file} cannot be empty"

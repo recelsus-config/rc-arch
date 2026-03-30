@@ -12,7 +12,7 @@ RUN set -eux; \
     source /tmp/build.config && \
     pacman -S --noconfirm --needed sudo git base-devel "${INSTALL_PACKAGES[@]}" && \
     groupadd -g 1000 arch && \
-    useradd -m -u 1000 -g arch -s /bin/bash arch && \
+    useradd -m -u 1000 -g arch -G wheel -s /bin/bash arch && \
     echo "arch ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/arch && \
     git clone https://github.com/${CONFIG_REPO_NVIM}.git /home/arch/.config/nvim && \
     git clone https://github.com/${CONFIG_REPO_TMUX}.git /home/arch/.config/tmux && \

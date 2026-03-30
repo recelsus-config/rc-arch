@@ -18,6 +18,7 @@ docker pull ghcr.io/recelsus-config/rc-arch:latest
 ### rc-arch
 
 `rc-arch` は対象イメージ専用の薄い Docker ラッパーです。
+`run` と `exec` では `--detach-keys "ctrl-\\"` を付けて起動します。
 
 ```bash
 rc-arch help
@@ -47,6 +48,7 @@ rc-arch pull
 rc-arch run
 rc-arch run -n work
 rc-arch run --rm
+rc-arch run --host-uid
 rc-arch run --network mynet -p 3000:3000 -v "$PWD:/workspace"
 rc-arch exec
 rc-arch exec -n work
@@ -76,6 +78,7 @@ rc-arch stop --all --remove
 
 - `RC_ARCH_ENV_VALUES` は同名の `RC_ARCH_ENV_NAMES` より優先されます
 - `--network` は `RC_ARCH_NETWORK` より優先されます
+- `--host-uid` は config の `USER_UID=...` より優先されます
 - `-p` と `-v` は config の値に追加されます
 
 設定例:
@@ -93,6 +96,7 @@ RC_ARCH_ENV_NAMES=(
 )
 
 RC_ARCH_ENV_VALUES=(
+    "USER_UID=1001"
     "OPENAI_BASE_URL=https://example.invalid/v1"
 )
 
@@ -111,6 +115,7 @@ RC_ARCH_VOLUMES=(
 この場合:
 
 - ホストにある `OPENAI_API_KEY` はコンテナへ引き継がれます
+- `USER_UID=1001` によりコンテナ内ユーザー `arch` の UID は起動時に 1001 へ調整されます
 - `OPENAI_BASE_URL` はコンテナ内だけ固定値になります
 - `.ssh` や作業ディレクトリのマウント、既定ネットワーク、ポート公開も自動で付きます
 
@@ -127,5 +132,7 @@ docker build -f docker/Dockerfile -t rc-arch .
 
 - ベースイメージは `archlinux:latest` です
 - コンテナ内ユーザーは `arch` です
-- UID/GID は `1000` 固定です
+- デフォルトの UID/GID は `1000:1000` です
+- `USER_UID` を渡すと起動時に `arch` の UID だけ変更できます
+- `arch` は補助グループとして `wheel` に参加しています
 - `rc-arch` が対象にするのは `ghcr.io/recelsus-config/rc-arch:latest` 由来のコンテナです

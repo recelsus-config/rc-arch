@@ -9,18 +9,20 @@ RC_ARCH_ENV_NAMES=(
 # Set fixed environment values inside the container.
 # These override variables passed through with RC_ARCH_ENV_NAMES.
 RC_ARCH_ENV_VALUES=(
-    # "OPENAI_BASE_URL=https://example.invalid/v1"
+    "USER_UID=1001"
+    "OPENAI_BASE_URL=https://example.invalid/v1"
 )
 
 # Default docker run --network value.
-RC_ARCH_NETWORK=""
+RC_ARCH_NETWORK="devnet"
 
 # Default docker run -p values.
 RC_ARCH_PORTS=(
-    # "3000:3000"
+    "3000:3000"
 )
 
 # Default docker run -v values.
 RC_ARCH_VOLUMES=(
     "$HOME/.ssh:/home/arch/.ssh:ro"
+    "$PWD:/workspace"
 )
