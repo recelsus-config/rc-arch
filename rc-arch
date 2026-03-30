@@ -8,6 +8,7 @@ default_shell="/bin/bash"
 detach_keys="ctrl-\\"
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/rc-arch"
 config_file="${config_dir}/rc-arch.conf"
+legacy_config_file="${config_dir}/rc-arch.config"
 
 usage() {
     cat <<'USAGE'
@@ -38,7 +39,7 @@ Run options:
   -n, --name NAME      Container name (default: rc-arch)
       --host-uid       Pass the current host uid as USER_UID
       --network NAME   Docker network name
-      --no-config      Ignore ~/.config/rc-arch/rc-arch.conf
+      --no-config      Ignore ~/.config/rc-arch/rc-arch.conf and rc-arch.config
       --rm             Use auto-remove and force the container name rc-arch-test
   -p, --port SPEC      Publish a port mapping (repeatable)
   -v, --volume SPEC    Bind a volume mount (repeatable)
@@ -59,6 +60,7 @@ Notes:
   - run defaults to /bin/bash when no command is provided.
   - --rm cannot be combined with --name/-n.
   - run reads ${XDG_CONFIG_HOME:-$HOME/.config}/rc-arch/rc-arch.conf when present.
+  - If rc-arch.conf is missing, rc-arch.config is used as a fallback.
   - --host-uid overrides USER_UID from the runtime config.
 USAGE
 }
@@ -128,13 +130,18 @@ validate_env_name() {
 }
 
 load_run_config() {
+    local source_config=""
     config_env_names=()
     config_env_values=()
     config_ports=()
     config_volumes=()
     config_network=""
 
-    if [[ ! -f "${config_file}" ]]; then
+    if [[ -f "${config_file}" ]]; then
+        source_config="${config_file}"
+    elif [[ -f "${legacy_config_file}" ]]; then
+        source_config="${legacy_config_file}"
+    else
         return
     fi
 
@@ -145,7 +152,7 @@ load_run_config() {
     local RC_ARCH_NETWORK=""
 
     # shellcheck disable=SC1090
-    source "${config_file}"
+    source "${source_config}"
 
     config_env_names=("${RC_ARCH_ENV_NAMES[@]}")
     config_env_values=("${RC_ARCH_ENV_VALUES[@]}")
