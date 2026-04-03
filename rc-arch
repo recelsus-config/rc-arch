@@ -142,7 +142,7 @@ load_run_config() {
     elif [[ -f "${legacy_config_file}" ]]; then
         source_config="${legacy_config_file}"
     else
-        return
+        return 0
     fi
 
     local -a RC_ARCH_ENV_NAMES=()
